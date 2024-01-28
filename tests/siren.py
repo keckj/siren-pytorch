@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 import torch
-from siren_pytorch import Sine
+from siren_pytorch import Sine, Siren
 
 fd_schemes = {
     0: [1.0],
@@ -28,8 +28,39 @@ class TestSine(unittest.TestCase):
             approx /= eps**der
 
             max_err = abs(actual - approx).max()
-            print(f'der={der}, err={max_err:2.2e}')
-            assert np.allclose(actual, approx, rtol=1e-3)
+            print(f'Sine der={der}, err={max_err:2.2e}')
+            assert torch.allclose(actual, approx, rtol=1e-3)
+
+
+class TestSiren(unittest.TestCase):
+    def test_derivative(self):
+        w0 = 8.0
+
+        dim_in  = 2
+        dim_out = 3
+        siren = Siren(dim_in, dim_out, w0=w0).double()
+
+        x = torch.rand(1024, dtype=torch.float64)
+        y = torch.rand(1024, dtype=torch.float64)
+
+        eps = 1e-6
+
+        z, dz = siren(torch.column_stack([x, y]))
+
+        yp, _ = siren(torch.column_stack([x+eps, y]))
+        yn, _ = siren(torch.column_stack([x-eps, y]))
+        dz_dx = (yp-yn)/(2*eps)
+
+        yp, _ = siren(torch.column_stack([x, y+eps]))
+        yn, _ = siren(torch.column_stack([x, y-eps]))
+        dz_dy = (yp-yn)/(2*eps)
+
+        dz_fd = torch.dstack([dz_dx, dz_dy])
+
+        max_err = abs(dz - dz_fd).max()
+        print(f'Siren err={max_err:2.2e}')
+        assert torch.allclose(dz, dz_fd, rtol=1e-8)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -12,7 +12,6 @@ def exists(val):
 def cast_tuple(val, repeat = 1):
     return val if isinstance(val, tuple) else ((val,) * repeat)
 
-# sin activation
 
 class Sine(nn.Module):
     def __init__(self, w0 = 1.):
@@ -22,7 +21,6 @@ class Sine(nn.Module):
     def forward(self, x, der=0):
         return ((-1)**(der//2))*(self.w0**der)*(torch.sin if der%2==0 else torch.cos)(self.w0 * x)
 
-# siren layer
 
 class Siren(nn.Module):
     def __init__(
@@ -34,7 +32,6 @@ class Siren(nn.Module):
         is_first = False,
         use_bias = True,
         activation = None,
-        dropout = 0.
     ):
         super().__init__()
         self.dim_in = dim_in
@@ -47,7 +44,6 @@ class Siren(nn.Module):
         self.weight = nn.Parameter(weight)
         self.bias = nn.Parameter(bias) if use_bias else None
         self.activation = Sine(w0) if activation is None else activation
-        self.dropout = nn.Dropout(dropout)
 
     def init_(self, weight, bias, c, w0):
         dim = self.dim_in
@@ -59,10 +55,12 @@ class Siren(nn.Module):
             bias.uniform_(-w_std, w_std)
 
     def forward(self, x):
-        out =  F.linear(x, self.weight, self.bias)
-        out = self.activation(out)
-        out = self.dropout(out)
-        return out
+        y =  F.linear(x, self.weight, self.bias)
+        z = self.activation(y)
+
+        dz_dx = self.activation(y, der=1)[...,None]*self.weight
+
+        return z, dz_dx
 
 # siren network
 
@@ -77,7 +75,6 @@ class SirenNet(nn.Module):
         w0_initial = 30.,
         use_bias = True,
         final_activation = None,
-        dropout = 0.
     ):
         super().__init__()
         self.num_layers = num_layers
@@ -95,7 +92,6 @@ class SirenNet(nn.Module):
                 w0 = layer_w0,
                 use_bias = use_bias,
                 is_first = is_first,
-                dropout = dropout
             )
 
             self.layers.append(layer)
