@@ -22,6 +22,16 @@ class Sine(nn.Module):
         return ((-1)**(der//2))*(self.w0**der)*(torch.sin if der%2==0 else torch.cos)(self.w0 * x)
 
 
+class Identity(nn.Identity):
+    def forward(self, x, der=0):
+        if der == 0:
+            return super().forward(x)
+        elif der == 1:
+            return torch.ones_like(x)
+        else:
+            return torch.zeros_like(x)
+
+
 class Siren(nn.Module):
     def __init__(
         self,
@@ -96,19 +106,29 @@ class SirenNet(nn.Module):
 
             self.layers.append(layer)
 
-        final_activation = nn.Identity() if not exists(final_activation) else final_activation
+        final_activation = Identity() if not exists(final_activation) else final_activation
         self.last_layer = Siren(dim_in = dim_hidden, dim_out = dim_out, w0 = w0, use_bias = use_bias, activation = final_activation)
 
     def forward(self, x, mods = None):
         mods = cast_tuple(mods, self.num_layers)
 
+        dx = None
         for layer, mod in zip(self.layers, mods):
-            x = layer(x)
+            y, dy = layer(x)
+
+            x = y
+            if dx is None:
+                dx = dy
+            else:
+                dx = torch.matmul(dy, dx)
 
             if exists(mod):
                 x *= rearrange(mod, 'd -> () d')
 
-        return self.last_layer(x)
+        y, dy = self.last_layer(x)
+        x = y
+        dx = torch.matmul(dy, dx)
+        return x, dx
 
 # modulatory feed forward
 
