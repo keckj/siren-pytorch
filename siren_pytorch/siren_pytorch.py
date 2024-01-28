@@ -18,8 +18,9 @@ class Sine(nn.Module):
     def __init__(self, w0 = 1.):
         super().__init__()
         self.w0 = w0
-    def forward(self, x):
-        return torch.sin(self.w0 * x)
+
+    def forward(self, x, der=0):
+        return ((-1)**(der//2))*(self.w0**der)*(torch.sin if der%2==0 else torch.cos)(self.w0 * x)
 
 # siren layer
 
