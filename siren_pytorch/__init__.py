@@ -1,1 +1,1 @@
-from siren_pytorch.siren_pytorch import Sine, Siren, SirenNet, SirenWrapper
+from siren_pytorch.siren_pytorch import Sine, Identity, Sigmoid, Siren, SirenNet, SirenWrapper

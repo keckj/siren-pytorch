@@ -32,6 +32,17 @@ class Identity(nn.Identity):
             return torch.zeros_like(x)
 
 
+class Sigmoid(nn.Sigmoid):
+    def forward(self, x, der=0):
+        if der == 0:
+            return super().forward(x)
+        elif der == 1:
+            y = torch.exp(x)
+            return y / (1+y)**2
+        else:
+            raise NotImplementedError(der)
+
+
 class Siren(nn.Module):
     def __init__(
         self,
