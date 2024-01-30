@@ -57,9 +57,8 @@ class SirenOutput:
         if not self:
             return other
         f = other.f
-        print(other.Jf.shape, self.Jf.shape)
-        J = torch.matmul(other.Jf, self.Jf)
-        H = None
+        J = torch.matmul(other.J, self.J)
+        H = torch.einsum('...ij, ...jkl -> ...ikl', other.J, self.H) + torch.einsum('...ji, ...kjl, ...lp -> ...kip', self.J, other.H, self.J)
         return SirenOutput(f, J, H)
 
     def __iter__(self):
@@ -71,7 +70,7 @@ class SirenOutput:
         return (self.f, self.J, self.H)
 
     def __bool__(self):
-        return any(map(bool, tuple(self)))
+        return all(_ is not None for _ in self)
 
 
 class Siren(nn.Module):
@@ -156,10 +155,10 @@ class SirenNet(nn.Module):
         self.last_layer = Siren(dim_in = dim_hidden, dim_out = dim_out, w0 = w0, use_bias = use_bias, activation = final_activation)
 
     def forward(self, x):
-        x = SirenOutput()
+        x = SirenOutput(x)
         for layer in self.layers:
-            x = x.compose(layer(x))
-        return x.compose(self.last_layer(x))
+            x = x.compose(layer(x.f))
+        return x.compose(self.last_layer(x.f))
 
 
 # modulatory feed forward

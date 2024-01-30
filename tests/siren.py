@@ -46,6 +46,7 @@ class TestSiren(unittest.TestCase):
 
         dim_in  = 2
         dim_out = 3
+
         siren = Siren(dim_in, dim_out, w0=w0).double()
 
         x = torch.rand(1024, dtype=torch.float64)
@@ -84,29 +85,34 @@ class TestSirenNet(unittest.TestCase):
         dim_hidden = 32
         dim_out = 3
         num_layers = 4
+
         siren = SirenNet(dim_in, dim_hidden, dim_out, num_layers,
                 w0=w0, w0_initial=w0_initial, final_activation=Sigmoid()).double()
 
         x = torch.rand(1024, dtype=torch.float64)
         y = torch.rand(1024, dtype=torch.float64)
-
         eps = 1e-6
 
-        z, dz = siren(torch.column_stack([x, y]))
+        z, J, H = siren(torch.column_stack([x, y]))
 
-        yp, _ = siren(torch.column_stack([x+eps, y]))
-        yn, _ = siren(torch.column_stack([x-eps, y]))
+        yp, Jp, _ = siren(torch.column_stack([x+eps, y]))
+        yn, Jn, _ = siren(torch.column_stack([x-eps, y]))
         dz_dx = (yp-yn)/(2*eps)
+        Jz_dx = (Jp-Jn)/(2*eps)
 
-        yp, _ = siren(torch.column_stack([x, y+eps]))
-        yn, _ = siren(torch.column_stack([x, y-eps]))
+        yp, Jp, _ = siren(torch.column_stack([x, y+eps]))
+        yn, Jn, _ = siren(torch.column_stack([x, y-eps]))
         dz_dy = (yp-yn)/(2*eps)
+        Jz_dy = (Jp-Jn)/(2*eps)
 
-        dz_fd = torch.dstack([dz_dx, dz_dy])
+        Jfd = torch.stack([dz_dx, dz_dy], -1)
+        Hfd = torch.stack([Jz_dx, Jz_dy], -1)
 
-        max_err = abs(dz - dz_fd).max()
-        print(f'Siren err={max_err:2.2e}')
-        assert torch.allclose(dz, dz_fd, rtol=1e-8)
+        J_max_err = abs(J-Jfd).max()
+        H_max_err = abs(H-Hfd).max()
+        print(f'Siren Jerr={J_max_err:2.2e}, Herr={H_max_err:2.2e},')
+        assert torch.allclose(J, Jfd, rtol=1e-8)
+        assert torch.allclose(H, Hfd, rtol=1e-8)
 
 if __name__ == '__main__':
     unittest.main()
