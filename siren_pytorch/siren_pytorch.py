@@ -28,8 +28,10 @@ class Identity(nn.Identity):
             return super().forward(x)
         elif der == 1:
             return torch.ones_like(x)
-        else:
+        elif der > 1:
             return torch.zeros_like(x)
+        else:
+            raise NotImplementedError(der)
 
 
 class Sigmoid(nn.Sigmoid):
@@ -41,36 +43,98 @@ class Sigmoid(nn.Sigmoid):
             return y / (1+y)**2
         elif der == 2:
             y = torch.exp(x)
-            return y*(1-y)/(1+y)**3
+            return y*(1-y)/ (1+y)**3
+        elif der == 3:
+            y = torch.exp(x)
+            return y*((y-4)*y+1) / (1+y)**4
+        elif der == 4:
+            y = torch.exp(x)
+            return y*(((-y+11)*y-11)*y+1) / (1+y)**5
         else:
             raise NotImplementedError(der)
 
 
 class SirenOutput:
-    def __init__(self, f=None, J=None, H=None):
-        self.f = f  # function eval
-        self.J = J  # jacobian
-        self.H = H  # hessian
+    def __init__(self, *args):
+        """
+        Create a new SirenOutput object either from a tuple of torch tensors
+        representing function evaluation and successive spatial derivatives
+        f, df, d2f, d3f, and so on. Input can also contain None values.
+        """
+        assert len(args) >= 1, 'SirenOutput requires at least function evaluation.'
+        assert all(isinstance(_, (torch.Tensor, type(None))) for _ in args), tuple(map(type, args))
+        self.tensors = list(args)
+
+    def resize(self, max_derivative):
+        """Resize output to handle at least max_derivative spatial derivatives."""
+        assert max_derivative >= 0, max_derivative
+        missing_derivatives = max_derivative - len(self) + 1
+        if missing_derivatives > 0:
+            self.tensors += (None,) * missing_derivatives
+        return self
+
+    @property
+    def f(self):
+        """Evaluated function."""
+        return self.tensors[0]
 
     def compose(self, other):
+        """Compose derivatives f(g(x)) where g represent self and f other."""
         assert isinstance(other, SirenOutput), type(other)
+        assert len(other) == len(self), (len(other), len(self))
         if not self:
             return other
-        f = other.f
-        J = torch.matmul(other.J, self.J)
-        H = torch.einsum('...ij, ...jkl -> ...ikl', other.J, self.H) + torch.einsum('...ji, ...kjl, ...lp -> ...kip', self.J, other.H, self.J)
-        return SirenOutput(f, J, H)
+        D = len(self)
+        out = SirenOutput(other.f).resize(D-1)
+        for der in range(1, D-1):
+            out[der] = self._compose_derivatives(der, other)
+        return out
+
+    def _compose_derivatives(self, der, other):
+        """Compose derivatives using Faà di Bruno's formulas for chain rule for f(g(x))."""
+        if der == 1:    # compose jacobians
+            return torch.matmul(other.df, self.df)
+        elif der == 2:  # compose hessians
+            return torch.einsum('...ij, ...jkl -> ...ikl', other.df, self.d2f) + torch.einsum('...ji, ...kjl, ...lp -> ...kip', self.df, other.d2f, self.df)
+        else:
+            raise NotImplementedError(der)
+
+    def __getattr__(self, name):
+        """Get other derivatives as df, d2f, d3f, ..."""
+        if name.startswith('d') and name.endswith('f'):
+            try:
+                order = 1 if name=='df' else int(name[1:-1])
+                assert order > 0, "Derivative order must be positive"
+                assert order < len(self), f"Derivative of order {order} not available, max order is {len(self)-1}."
+                return self.tensors[order]
+            except ValueError:
+                pass
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+
+    def __getitem__(self, k):
+        assert k < len(self), (k, len(self))
+        return self.tensors[k]
+
+    def __setitem__(self, k, v):
+        assert k < len(self), (k, len(self))
+        assert isinstance(v, (torch.Tensor, type(None)))
+        self.tensors[k] = v
 
     def __iter__(self):
-        yield self.f
-        yield self.J
-        yield self.H
+        for d in self.tensors:
+            yield d
 
     def __tuple__(self):
-        return (self.f, self.J, self.H)
+        return tuple(self.tensors)
+
+    def __len__(self):
+        return len(self.tensors)
 
     def __bool__(self):
         return all(_ is not None for _ in self)
+
+
+
 
 
 class Siren(nn.Module):
@@ -105,17 +169,28 @@ class Siren(nn.Module):
         if exists(bias):
             bias.uniform_(-w_std, w_std)
 
-    def forward(self, x):
-        y =  F.linear(x, self.weight, self.bias)
-
+    def forward(self, x, max_derivative=0):
+        y = F.linear(x, self.weight, self.bias)
         z = self.activation(y)
-        dz = self.activation(y, der=1)
-        d2z = self.activation(y, der=2)
-        
-        Jz = torch.einsum('...i,ij->...ij', dz, self.weight)
-        Hz = torch.einsum('...i,ij,ik->...ijk', d2z, self.weight, self.weight)
-        
-        return SirenOutput(z, Jz, Hz)
+
+        out = SirenOutput(z).resize(max_derivative)
+
+        if max_derivative >= 1:
+            out[1] = torch.einsum('...i,ij->...ij',
+                        self.activation(y, der=1), self.weight)
+        if max_derivative >= 2:
+            out[2] = torch.einsum('...i,ij,ik->...ijk',
+                        self.activation(y, der=2), self.weight, self.weight)
+        if max_derivative >= 3:
+            out[3] = torch.einsum('...i,ij,ik,il->...ijkl',
+                        self.activation(y, der=3), self.weight, self.weight, self.weight)
+        if max_derivative >= 4:
+            out[4] = torch.einsum('...i,ij,ik,il,im->...ijklm',
+                        self.activation(y, der=4), self.weight, self.weight, self.weight, self.weight)
+        if max_derivative >= 5:
+            raise NotImplementedError(der)
+
+        return out
 
 # siren network
 
@@ -154,11 +229,15 @@ class SirenNet(nn.Module):
         final_activation = Identity() if not exists(final_activation) else final_activation
         self.last_layer = Siren(dim_in = dim_hidden, dim_out = dim_out, w0 = w0, use_bias = use_bias, activation = final_activation)
 
-    def forward(self, x):
-        x = SirenOutput(x)
+    def forward(self, x, max_derivative=0):
+        x = SirenOutput(x).resize(max_derivative)
+
         for layer in self.layers:
-            x = x.compose(layer(x.f))
-        return x.compose(self.last_layer(x.f))
+            y = layer(x.f, max_derivative=max_derivative)
+            x = x.compose(y)
+
+        y = self.last_layer(x.f, max_derivative=max_derivative)
+        return x.compose(y)
 
 
 # modulatory feed forward
