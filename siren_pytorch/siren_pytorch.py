@@ -39,8 +39,39 @@ class Sigmoid(nn.Sigmoid):
         elif der == 1:
             y = torch.exp(x)
             return y / (1+y)**2
+        elif der == 2:
+            y = torch.exp(x)
+            return y*(1-y)/(1+y)**3
         else:
             raise NotImplementedError(der)
+
+
+class SirenOutput:
+    def __init__(self, f=None, J=None, H=None):
+        self.f = f  # function eval
+        self.J = J  # jacobian
+        self.H = H  # hessian
+
+    def compose(self, other):
+        assert isinstance(other, SirenOutput), type(other)
+        if not self:
+            return other
+        f = other.f
+        print(other.Jf.shape, self.Jf.shape)
+        J = torch.matmul(other.Jf, self.Jf)
+        H = None
+        return SirenOutput(f, J, H)
+
+    def __iter__(self):
+        yield self.f
+        yield self.J
+        yield self.H
+
+    def __tuple__(self):
+        return (self.f, self.J, self.H)
+
+    def __bool__(self):
+        return any(map(bool, tuple(self)))
 
 
 class Siren(nn.Module):
@@ -77,11 +108,15 @@ class Siren(nn.Module):
 
     def forward(self, x):
         y =  F.linear(x, self.weight, self.bias)
+
         z = self.activation(y)
-
-        dz_dx = self.activation(y, der=1)[...,None]*self.weight
-
-        return z, dz_dx
+        dz = self.activation(y, der=1)
+        d2z = self.activation(y, der=2)
+        
+        Jz = torch.einsum('...i,ij->...ij', dz, self.weight)
+        Hz = torch.einsum('...i,ij,ik->...ijk', d2z, self.weight, self.weight)
+        
+        return SirenOutput(z, Jz, Hz)
 
 # siren network
 
@@ -120,26 +155,12 @@ class SirenNet(nn.Module):
         final_activation = Identity() if not exists(final_activation) else final_activation
         self.last_layer = Siren(dim_in = dim_hidden, dim_out = dim_out, w0 = w0, use_bias = use_bias, activation = final_activation)
 
-    def forward(self, x, mods = None):
-        mods = cast_tuple(mods, self.num_layers)
+    def forward(self, x):
+        x = SirenOutput()
+        for layer in self.layers:
+            x = x.compose(layer(x))
+        return x.compose(self.last_layer(x))
 
-        dx = None
-        for layer, mod in zip(self.layers, mods):
-            y, dy = layer(x)
-
-            x = y
-            if dx is None:
-                dx = dy
-            else:
-                dx = torch.matmul(dy, dx)
-
-            if exists(mod):
-                x *= rearrange(mod, 'd -> () d')
-
-        y, dy = self.last_layer(x)
-        x = y
-        dx = torch.matmul(dy, dx)
-        return x, dx
 
 # modulatory feed forward
 
