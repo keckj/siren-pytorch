@@ -70,7 +70,8 @@ class SirenOutput:
         assert max_derivative >= 0, max_derivative
         missing_derivatives = max_derivative - len(self) + 1
         if missing_derivatives > 0:
-            self.tensors += (None,) * missing_derivatives
+            self.tensors.extend([None] * missing_derivatives)
+        assert(len(self) >= max_derivative+1)
         return self
 
     @property
@@ -86,12 +87,12 @@ class SirenOutput:
             return other
         D = len(self)
         out = SirenOutput(other.f).resize(D-1)
-        for der in range(1, D-1):
-            out[der] = self._compose_derivatives(der, other)
+        for der in range(1, D):
+            out[der] = self._compose_derivative(der, other)
         return out
 
-    def _compose_derivatives(self, der, other):
-        """Compose derivatives using Faà di Bruno's formulas for chain rule for f(g(x))."""
+    def _compose_derivative(self, der, other):
+        """Compose derivative order der using Faà di Bruno's formulas for chain rule for f(g(x))."""
         if der == 1:    # compose jacobians
             return torch.matmul(other.df, self.df)
         elif der == 2:  # compose hessians
@@ -133,6 +134,13 @@ class SirenOutput:
     def __bool__(self):
         return all(_ is not None for _ in self)
 
+    def __str__(self):
+        def tensor_info(i):
+            try:
+                return f'f={tuple(self.f.shape)}' if i == 0 else f'd{i}f={tuple(self[i].shape)}'
+            except AttributeError:
+                return f'f=None' if i == 0 else f'd{i}f=None'
+        return f'{self.__class__.__name__}(' + ', '.join(tensor_info(i) for i in range(len(self))) + ')'
 
 
 
