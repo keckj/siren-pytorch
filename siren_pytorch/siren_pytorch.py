@@ -96,13 +96,13 @@ class SirenOutput:
         if der == 1:    # compose jacobians
             return torch.matmul(other.df, self.df)
         elif der == 2:  # compose hessians
-            H0 = torch.einsum('...ij, ...jkl -> ...ikl', other.df, self.d2f)
-            H1 = torch.einsum('...ji, ...kjl, ...lp -> ...kip', self.df, other.d2f, self.df)
+            H0 = torch.einsum('...ijk, ...jl, ...km -> ...ilm', other.d2f, self.df, self.df)
+            H1 = torch.einsum('...ij, ...jkl -> ...ikl', other.df, self.d2f)
             return H0 + H1
         elif der == 3:  # compose third order derivatives
             H0 = torch.einsum('...ijkl,...jm,...kn,...lo->...imno', other.d3f, self.df, self.df, self.df)
             H1 = 3*torch.einsum('...ijk,...jl,...kmn->...ilmn', other.d2f, self.df, self.d2f)
-            H2 = torch.einsum('...ijkl,...mi->...mjkl', self.d3f, other.df)
+            H2 = torch.einsum('...ij,...jklm->...iklm', other.df, self.d3f)
             return H0 + H1 + H2
         else:
             raise NotImplementedError(der)
